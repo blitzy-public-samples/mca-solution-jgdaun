@@ -1,0 +1,146 @@
+# Kubernetes Deployment configuration for OCR Service
+# Version: apps/v1
+# Dependencies:
+# - Kubernetes v1.21
+# - AWS EKS v1.21
+# - NVIDIA GPU Operator v1.9.0
+
+# This deployment configuration implements:
+# 1. High availability with 3 replicas
+# 2. GPU-accelerated processing capabilities
+# 3. Resource allocation and limits
+# 4. Health monitoring and probes
+# 5. Rolling update strategy
+# 6. Pod anti-affinity for high availability
+# 7. Node selection for GPU-enabled instances
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-deployment
+  namespace: default
+  labels:
+    app: ocr
+    tier: processing
+    component: ocr-service
+spec:
+  # Implements requirement: High availability through multiple replicas
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ocr
+      tier: processing
+      component: ocr-service
+  template:
+    metadata:
+      labels:
+        app: ocr
+        tier: processing
+        component: ocr-service
+      annotations:
+        # Enable Prometheus metrics scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/metrics"
+        # Allow cluster autoscaler to safely evict pods
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+    spec:
+      containers:
+        - name: ocr-container
+          image: ocr-service:latest
+          imagePullPolicy: Always
+          # Resource allocation based on technical specifications
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+              # GPU resource request for enhanced OCR processing
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+              nvidia.com/gpu: "1"
+          env:
+            - name: PORT
+              value: "8083"
+            - name: NODE_ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "info"
+            # Secure credentials management using Kubernetes secrets
+            - name: OCR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ocr-secrets
+                  key: ocr-api-key
+            - name: AWS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: aws-access-key
+            - name: AWS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: aws-secret-key
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: aws-config
+                  key: region
+          ports:
+            - name: http
+              containerPort: 8083
+              protocol: TCP
+          # Health monitoring configuration
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8083
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+      # Node selection for GPU-enabled instances
+      nodeSelector:
+        accelerator: nvidia-gpu
+        node.kubernetes.io/instance-type: c5.2xlarge
+      # GPU node tolerations
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # Pod anti-affinity for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ocr
+                topologyKey: kubernetes.io/hostname
+  # Rolling update strategy for zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
