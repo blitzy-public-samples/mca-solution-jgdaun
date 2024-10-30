@@ -1,0 +1,134 @@
+# Kubernetes version: 1.21
+# AWS EKS version: 1.21
+# AWS Secrets Manager version: 2.0
+
+# This deployment configuration implements:
+# 1. High availability with multi-AZ deployment (minimum 3 replicas)
+# 2. Resource limits and requests aligned with t3.large specifications
+# 3. Health monitoring and readiness probes
+# 4. Rolling update strategy with zero downtime
+# 5. Pod anti-affinity for AZ distribution
+# 6. Secure secrets management using AWS Secrets Manager
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  labels:
+    app: backend
+    environment: production
+  annotations:
+    # Track deployment changes for rollback purposes
+    kubernetes.io/change-cause: "Initial deployment of backend service"
+spec:
+  # Implements requirement: Minimum 3 instances per service for high availability
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        environment: production
+      annotations:
+        # AWS IAM role for backend service
+        iam.amazonaws.com/role: backend-app-role
+        # Prometheus monitoring configuration
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "80"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Use dedicated service account for backend
+      serviceAccountName: backend-service-account
+      containers:
+        - name: backend-container
+          image: backend-image:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: APP_PORT
+              value: "80"
+            # Secure database credentials using AWS Secrets Manager
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: db-host
+            - name: DB_PORT
+              value: "5432"
+            - name: REDIS_HOST
+              value: "redis-service"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: SECRETS_ARN
+              value: "arn:aws:secretsmanager:us-east-1:account:secret:backend-secrets"
+          # Resource limits aligned with t3.large specifications
+          resources:
+            requests:
+              cpu: "500m"    # 0.5 vCPU
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"   # 1 vCPU
+              memory: "1024Mi"
+          # Health check configuration
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+      # Pull secrets for private container registry
+      imagePullSecrets:
+        - name: registry-credentials
+      # Implement pod anti-affinity for AZ distribution
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - backend
+                topologyKey: topology.kubernetes.io/zone
+      # Node failure handling
+      tolerations:
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+  # Zero-downtime deployment strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
