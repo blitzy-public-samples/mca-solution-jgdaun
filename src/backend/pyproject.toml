@@ -1,0 +1,101 @@
+[tool.poetry]
+name = "dollar-funding-mca-application-processing-system"
+version = "0.1.0"
+description = "Backend system for processing MCA applications with OCR and document analysis capabilities"
+authors = ["Development Team <devteam@example.com>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://example.com"
+repository = "https://github.com/example/repo"
+keywords = ["mca", "document-processing", "ocr", "api"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10"
+]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+# Web Framework and API - v0.95.0
+fastapi = "0.95.0"
+# ASGI Server - v0.15.0
+uvicorn = "0.15.0"
+# Database ORM and Migrations - v2.0.0, v1.7.1
+sqlalchemy = "2.0.0"
+alembic = "1.7.1"
+# Data Validation - v2.0.0
+pydantic = "2.0.0"
+# Task Queue and Message Broker - v5.3.0, v4.5.0
+celery = "5.3.0"
+redis = "4.5.0"
+# AWS Integration - v1.26.0
+boto3 = "1.26.0"
+# Authentication - v2.1.0
+PyJWT = "2.1.0"
+# Document Processing - v0.3.8, v8.2.0
+pytesseract = "0.3.8"
+Pillow = "8.2.0"
+# NLP Processing - v3.5.0
+spacy = "3.5.0"
+# File Upload Handling - v0.0.6
+python-multipart = "0.0.6"
+# Database Drivers - v2.9.5, v4.3.0
+psycopg2-binary = "2.9.5"
+pymongo = "4.3.0"
+
+[tool.poetry.group.dev.dependencies]
+# Testing - v7.3.1
+pytest = "^7.3.1"
+pytest-cov = "^4.0.0"
+pytest-asyncio = "^0.21.0"
+# Code Quality - v23.3.0, v6.0.0, v1.3.0
+black = "^23.3.0"
+flake8 = "^6.0.0"
+mypy = "^1.3.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+start = "uvicorn app.main:app --reload"
+celery = "celery -A app.core.celery_app worker --loglevel=info"
+test = "pytest"
+migrate = "alembic upgrade head"
+lint = "flake8 ."
+format = "black ."
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+include = '\.pyi?$'
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = "E203"
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info"
+]
+
+[tool.mypy]
+python_version = "3.9"
+disallow_untyped_defs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --cov=app"
+testpaths = [
+    "tests"
+]
+python_files = ["test_*.py", "*_test.py"]
