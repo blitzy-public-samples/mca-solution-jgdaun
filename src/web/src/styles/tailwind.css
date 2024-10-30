@@ -1,0 +1,211 @@
+/* Tailwind CSS v3.0.0 */
+
+/* Base layer - Reset and default styles */
+@tailwind base;
+
+/* Custom base styles for consistent cross-browser rendering */
+@layer base {
+  /* Root theme variables from tailwind.config.js */
+  :root {
+    /* Primary colors */
+    --color-primary: #1D4ED8;
+    --color-secondary: #9333EA;
+    --color-background: #F3F4F6;
+    --color-text: #111827;
+
+    /* Status colors */
+    --color-status-new: #10B981;
+    --color-status-processing: #F59E0B;
+    --color-status-complete: #059669;
+    --color-status-failed: #DC2626;
+
+    /* Navigation colors */
+    --color-nav-active: #2563EB;
+    --color-nav-hover: #3B82F6;
+    --color-nav-inactive: #6B7280;
+  }
+
+  /* Global typography settings */
+  html {
+    font-family: Inter, system-ui, sans-serif;
+    @apply text-text antialiased;
+  }
+
+  /* Smooth scrolling behavior */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Focus outline styles */
+  *:focus {
+    @apply outline-none ring-2 ring-primary ring-opacity-50;
+  }
+}
+
+/* Components layer - Reusable UI components */
+@tailwind components;
+
+/* Custom component styles */
+@layer components {
+  /* Document Viewer Component Styles */
+  .document-viewer {
+    @apply bg-white rounded-lg shadow-lg p-4;
+  }
+
+  .document-viewer-toolbar {
+    @apply flex items-center justify-between border-b border-gray-200 pb-4 mb-4;
+  }
+
+  /* Status Filters Component Styles */
+  .status-filter {
+    @apply inline-flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors;
+  }
+
+  .status-filter-new {
+    @apply bg-status-new bg-opacity-10 text-status-new;
+  }
+
+  .status-filter-processing {
+    @apply bg-status-processing bg-opacity-10 text-status-processing;
+  }
+
+  .status-filter-complete {
+    @apply bg-status-complete bg-opacity-10 text-status-complete;
+  }
+
+  .status-filter-failed {
+    @apply bg-status-failed bg-opacity-10 text-status-failed;
+  }
+
+  /* Action Buttons Component Styles */
+  .action-button {
+    @apply inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium transition-colors;
+  }
+
+  .action-button-primary {
+    @apply bg-primary text-white hover:bg-primary/90;
+  }
+
+  .action-button-secondary {
+    @apply bg-secondary text-white hover:bg-secondary/90;
+  }
+
+  /* Navigation Menu Component Styles */
+  .nav-item {
+    @apply flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors;
+  }
+
+  .nav-item-active {
+    @apply bg-navigation-active text-white;
+  }
+
+  .nav-item-inactive {
+    @apply text-navigation-inactive hover:bg-navigation-hover hover:text-white;
+  }
+
+  /* Search Bar Component Styles */
+  .search-bar {
+    @apply flex items-center w-full max-w-lg;
+  }
+
+  .search-input {
+    @apply w-full px-4 py-2 border border-gray-300 rounded-md focus:border-primary focus:ring-primary;
+  }
+
+  /* Dashboard Layout Components */
+  .dashboard-header {
+    @apply bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between;
+  }
+
+  .dashboard-main {
+    @apply px-4 py-6 bg-background;
+  }
+
+  .dashboard-sidebar {
+    @apply w-64 bg-white border-r border-gray-200;
+  }
+
+  /* Application Details Components */
+  .app-details-section {
+    @apply bg-white rounded-lg shadow-sm p-6 mb-6;
+  }
+
+  .app-details-header {
+    @apply flex items-center justify-between mb-4 pb-4 border-b border-gray-200;
+  }
+
+  /* Form Elements */
+  .form-input {
+    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm;
+  }
+
+  .form-select {
+    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm;
+  }
+
+  .form-checkbox {
+    @apply rounded border-gray-300 text-primary focus:ring-primary;
+  }
+
+  /* Card Components */
+  .card {
+    @apply bg-white rounded-lg shadow-sm overflow-hidden;
+  }
+
+  .card-header {
+    @apply px-6 py-4 border-b border-gray-200;
+  }
+
+  .card-body {
+    @apply px-6 py-4;
+  }
+
+  .card-footer {
+    @apply px-6 py-4 border-t border-gray-200;
+  }
+}
+
+/* Utilities layer - Single-purpose utility classes */
+@tailwind utilities;
+
+/* Custom utilities */
+@layer utilities {
+  /* Text truncation */
+  .text-truncate {
+    @apply overflow-hidden whitespace-nowrap text-ellipsis;
+  }
+
+  /* Flex center shorthand */
+  .flex-center {
+    @apply flex items-center justify-center;
+  }
+
+  /* Transition utilities */
+  .transition-fast {
+    @apply transition-all duration-150 ease-in-out;
+  }
+
+  .transition-medium {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  /* Hover effects */
+  .hover-lift {
+    @apply transition-transform hover:-translate-y-0.5;
+  }
+
+  /* Focus ring utilities */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary;
+  }
+
+  /* Status indicator dots */
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full;
+  }
+
+  /* Grid layouts */
+  .grid-auto-fit {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6;
+  }
+}
