@@ -1,0 +1,168 @@
+# Docker Compose version as specified in external dependencies
+version: "3.8"
+
+# Define services based on system architecture and containerization requirements
+services:
+  # Main FastAPI backend service handling API requests
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://user:password@db:5432/app_db
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongodb:27017/documents
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+    depends_on:
+      - db
+      - redis
+      - mongodb
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: '4G'
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL database service for storing application data
+  db:
+    image: postgres:13
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=app_db
+    ports:
+      - "5432:5432"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d app_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: '4G'
+
+  # MongoDB database for storing document data
+  mongodb:
+    image: mongo:5.0
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=user
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: '4G'
+
+  # Redis service for caching and Celery task queue
+  redis:
+    image: redis:6.2
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: '2G'
+
+  # Celery worker service for processing asynchronous tasks
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.core.celery_app worker --loglevel=info
+    depends_on:
+      - redis
+      - db
+      - mongodb
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://user:password@db:5432/app_db
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongodb:27017/documents
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: '4G'
+
+  # OCR service for document processing
+  ocr_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.core.celery_app worker --loglevel=info --queue=ocr
+    depends_on:
+      - redis
+      - db
+      - mongodb
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://user:password@db:5432/app_db
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongodb:27017/documents
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: '8G'
+
+# Define persistent volumes for data storage
+volumes:
+  db_data:
+    driver: local
+    name: app_db_data
+  mongo_data:
+    driver: local
+    name: app_mongo_data
+  redis_data:
+    driver: local
+    name: app_redis_data
+
+# Define networks for service communication
+networks:
+  app_network:
+    driver: bridge
+    name: app_internal_network
