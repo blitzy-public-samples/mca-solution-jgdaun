@@ -1,0 +1,179 @@
+# Frontend CI Workflow for Document Processing System
+# Version: 1.0.0
+# This workflow handles testing, security scanning, and building of the frontend application
+
+name: Frontend CI
+
+# Trigger workflow on push/PR to main branch and on manual dispatch
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/web/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/web/**'
+  workflow_dispatch:
+
+# Environment variables
+env:
+  NODE_VERSION: '16.x'
+  CACHE_KEY: "npm-${{ hashFiles('**/package-lock.json') }}"
+  WORKING_DIRECTORY: 'src/web'
+
+# Define jobs
+jobs:
+  # Code Analysis Job
+  # Implements requirement: Security Scanning (security_considerations.security_protocols.security_testing_schedule)
+  code-analysis:
+    name: Code Analysis & Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm run lint
+
+      # CodeQL Analysis for JavaScript/TypeScript
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+      # Snyk Security Scan
+      - name: Run Snyk Security Scan
+        uses: snyk/actions/node@v1
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # Test Job
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: code-analysis
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Cache Dependencies
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.WORKING_DIRECTORY }}/node_modules
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: |
+            npm-
+
+      - name: Install Dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm ci
+
+      - name: Run Tests with Coverage
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm test -- --coverage
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v2
+        with:
+          name: coverage-report
+          path: ${{ env.WORKING_DIRECTORY }}/coverage
+          retention-days: 14
+
+  # Build Job
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/package-lock.json
+
+      - name: Cache Dependencies
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.WORKING_DIRECTORY }}/node_modules
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: |
+            npm-
+
+      - name: Install Dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm ci --production
+
+      - name: Type Check
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm run type-check
+
+      - name: Build Application
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: frontend-build
+          path: ${{ env.WORKING_DIRECTORY }}/dist
+          retention-days: 14
+
+  # Notify on failure
+  notify:
+    name: Notify on Failure
+    needs: [code-analysis, test, build]
+    runs-on: ubuntu-latest
+    if: failure()
+
+    steps:
+      - name: Send Failure Notification
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { repo, owner } = context.repo;
+            const run_id = context.runId;
+            const run_url = `https://github.com/${owner}/${repo}/actions/runs/${run_id}`;
+            github.rest.issues.create({
+              owner,
+              repo,
+              title: `❌ Frontend CI Pipeline Failed - Run #${run_id}`,
+              body: `The frontend CI pipeline has failed.\nPlease check the [workflow run](${run_url}) for more details.`,
+              labels: ['ci-failure', 'frontend']
+            });
