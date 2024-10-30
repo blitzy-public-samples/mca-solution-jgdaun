@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logo SVG for Document Processing System -->
+<!-- Implements requirements from:
+     - User Interface Design - Dashboard Layout: Logo component in header section
+     - User Interface Design - Main Dashboard Components: Brand presence across views -->
+<svg width="180" height="40" viewBox="0 0 180 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background rectangle with rounded corners -->
+    <rect width="180" height="40" rx="8" fill="#F8FAFC"/>
+    
+    <!-- Document icon representing the core functionality -->
+    <g transform="translate(20, 8)">
+        <!-- Main document shape -->
+        <path d="M16 2H8C6.89543 2 6 2.89543 6 4V20C6 21.1046 6.89543 22 8 22H16C17.1046 22 18 21.1046 18 20V4C18 2.89543 17.1046 2 16 2Z" 
+              stroke="#0EA5E9" 
+              stroke-width="2" 
+              stroke-linecap="round" 
+              stroke-linejoin="round"/>
+        
+        <!-- Scanning line animation -->
+        <line x1="8" y1="7" x2="16" y2="7" 
+              stroke="#0EA5E9" 
+              stroke-width="2" 
+              stroke-linecap="round">
+            <animate attributeName="y1" 
+                     values="7;17;7" 
+                     dur="3s" 
+                     repeatCount="indefinite"/>
+            <animate attributeName="y2" 
+                     values="7;17;7" 
+                     dur="3s" 
+                     repeatCount="indefinite"/>
+        </line>
+    </g>
+    
+    <!-- Company name text -->
+    <text x="50" 
+          y="25" 
+          font-family="Arial, sans-serif" 
+          font-size="16" 
+          font-weight="bold" 
+          fill="#0F172A">
+        DocProcessor
+    </text>
+    
+    <!-- Responsive scaling properties -->
+    <style>
+        @media (max-width: 768px) {
+            svg {
+                width: 140px;
+                height: 32px;
+            }
+        }
+        @media (max-width: 480px) {
+            svg {
+                width: 120px;
+                height: 28px;
+            }
+        }
+    </style>
+</svg>
