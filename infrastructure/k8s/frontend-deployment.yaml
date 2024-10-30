@@ -1,0 +1,125 @@
+# Kubernetes version: 1.21
+# AWS EKS version: 1.21
+
+# This deployment configuration implements:
+# 1. Frontend Layer Deployment requirements from system_architecture.component_details.frontend_layer
+# 2. UI Service Deployment requirements from infrastructure.deployment_environment
+# 3. High availability and scalability requirements for the frontend service
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: default
+  labels:
+    app: frontend
+    environment: production
+    component: ui
+  annotations:
+    # Deployment annotations for monitoring and management
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    kubernetes.io/description: "Frontend deployment for Dollar Funding MCA Application Processing System"
+spec:
+  # Maintain 3 replicas for high availability
+  replicas: 3
+  
+  # Rolling update strategy to ensure zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Maximum number of pods that can be created above desired replicas
+      maxUnavailable: 0   # Maximum number of pods that can be unavailable during update
+  
+  # Pod selector
+  selector:
+    matchLabels:
+      app: frontend
+  
+  # Pod template
+  template:
+    metadata:
+      labels:
+        app: frontend
+        environment: production
+        component: ui
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    
+    spec:
+      # Container specifications
+      containers:
+        - name: frontend
+          image: frontend-image:latest
+          imagePullPolicy: Always
+          
+          # Container ports
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          # Environment configuration from ConfigMap and Secrets
+          envFrom:
+            - configMapRef:
+                name: application-config
+            - secretRef:
+                name: application-secrets
+          
+          # Resource limits and requests as per infrastructure.deployment_environment
+          resources:
+            limits:
+              cpu: "1000m"    # 1 vCPU
+              memory: "2Gi"   # 2GB RAM
+            requests:
+              cpu: "500m"     # 0.5 vCPU
+              memory: "1Gi"   # 1GB RAM
+          
+          # Liveness probe to check container health
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Readiness probe to check if container is ready to serve traffic
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          
+          # Security context for container
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      
+      # Node selector to ensure deployment on Linux nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Pod anti-affinity to spread replicas across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - frontend
+                topologyKey: kubernetes.io/hostname
