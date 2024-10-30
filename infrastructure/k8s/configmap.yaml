@@ -1,0 +1,75 @@
+# Kubernetes version: 1.21
+# AWS EKS version: 1.21
+
+# This ConfigMap implements:
+# 1. Non-sensitive configuration data management for all microservices
+# 2. Environment-specific settings for production environment
+# 3. Centralized configuration for processing pipeline components
+# 4. Service endpoint configurations for inter-service communication
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-config
+  namespace: default
+  labels:
+    app: dollar-funding-mca
+    environment: production
+  annotations:
+    description: "Production configuration for Dollar Funding MCA Application Processing System"
+    version: "1.0"
+    last-updated: "2024-01-20"
+data:
+  # Application Environment Settings
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+
+  # Service URLs and Endpoints
+  API_BASE_URL: "https://api.example.com"
+  FRONTEND_URL: "https://frontend.example.com"
+  OCR_SERVICE_URL: "http://ocr-service:8083"
+  DOCUMENT_SERVICE_URL: "http://document-service:8084"
+  EMAIL_SERVICE_URL: "http://email-service:8085"
+  WEBHOOK_SERVICE_URL: "http://webhook-service:8086"
+
+  # Database Configuration
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "mca_processing"
+
+  # Cache Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+
+  # Document Store Configuration
+  MONGODB_HOST: "mongodb-service"
+  MONGODB_PORT: "27017"
+
+  # AWS Configuration
+  S3_BUCKET: "mca-documents"
+  AWS_REGION: "us-east-1"
+
+  # Message Queue Configuration
+  QUEUE_HOST: "rabbitmq-service"
+  QUEUE_PORT: "5672"
+
+  # OCR Processing Configuration
+  OCR_BATCH_SIZE: "10"
+  OCR_PROCESSING_TIMEOUT: "300"
+
+  # Document Management Configuration
+  DOCUMENT_RETENTION_DAYS: "90"
+  MAX_UPLOAD_SIZE: "10485760"  # 10MB in bytes
+  ALLOWED_FILE_TYPES: "application/pdf,image/jpeg,image/png"
+
+  # API Rate Limiting Configuration
+  API_RATE_LIMIT: "100"
+  API_RATE_WINDOW: "60"  # 60 seconds
+
+  # CORS Configuration
+  CORS_ALLOWED_ORIGINS: "https://frontend.example.com"
+
+  # Monitoring Configuration
+  METRICS_PORT: "9090"
+  HEALTH_CHECK_PATH: "/health"
+  READINESS_CHECK_PATH: "/ready"
