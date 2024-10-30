@@ -1,0 +1,99 @@
+# Kubernetes version: 1.21
+# AWS EKS version: 1.21
+
+# This service configuration implements:
+# 1. Network Architecture requirements (system_architecture.infrastructure_components.network_architecture)
+# 2. Core System Components exposure (system_components_architecture.component_diagrams.core_system_components)
+# 3. System Overview requirements (system_architecture.overview)
+
+# Backend Service - Exposes the main application backend
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  labels:
+    app: backend
+    tier: application
+    component: backend-service
+  annotations:
+    # Enable Prometheus metrics collection
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+    prometheus.io/path: "/metrics"
+spec:
+  # Use ClusterIP for internal service communication
+  type: ClusterIP
+  # Enable session affinity for consistent routing
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3-hour session timeout
+  # Select backend pods
+  selector:
+    app: backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80        # Service port
+      targetPort: 80  # Container port
+
+---
+# Frontend Service - Exposes the UI service
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  labels:
+    app: frontend
+    tier: presentation
+    component: frontend-service
+  annotations:
+    # Enable Prometheus metrics collection
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+    prometheus.io/path: "/metrics"
+spec:
+  # Use ClusterIP for internal service communication
+  type: ClusterIP
+  # Select frontend pods
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80        # Service port
+      targetPort: 80  # Container port
+
+---
+# OCR Service - Exposes the OCR processing service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocr-service
+  labels:
+    app: ocr
+    tier: processing
+    component: ocr-service
+  annotations:
+    # Enable Prometheus metrics collection
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8083"
+    prometheus.io/path: "/metrics"
+spec:
+  # Use ClusterIP for internal service communication
+  type: ClusterIP
+  # Enable session affinity for consistent processing
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600  # 1-hour session timeout
+  # Select OCR pods
+  selector:
+    app: ocr
+    tier: processing
+    component: ocr-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8083        # Service port
+      targetPort: 8083  # Container port
