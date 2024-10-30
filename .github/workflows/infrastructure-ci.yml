@@ -1,0 +1,242 @@
+# Infrastructure CI/CD Pipeline for Dollar Funding MCA Application Processing System
+# Version: 1.0
+# This workflow implements automated infrastructure deployment with blue-green strategy,
+# comprehensive health checks, and automated rollback capabilities.
+
+name: Infrastructure CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'infrastructure/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+env:
+  # Infrastructure configuration
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  DEPLOY_TIMEOUT: 600
+  HEALTH_CHECK_RETRIES: 5
+  HEALTH_CHECK_INTERVAL: 10
+  TF_VERSION: '~> 1.0'
+  
+  # SonarQube configuration
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Infrastructure Code
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          
+      - name: Initialize Terraform
+        run: |
+          cd infrastructure/terraform
+          terraform init -backend=false
+          
+      - name: Validate Terraform configurations
+        run: |
+          cd infrastructure/terraform
+          terraform validate
+          
+      - name: Run tflint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: v0.44.1
+          
+      - name: Lint Terraform code
+        run: |
+          cd infrastructure/terraform
+          tflint --format=compact
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Run Snyk Infrastructure as Code Scan
+        uses: snyk/actions@0.9.0
+        with:
+          command: iac test
+          args: infrastructure/terraform
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          
+      - name: Run SonarQube Analysis
+        uses: sonarsource/sonarqube-scan-action@v1.1
+        with:
+          args: >
+            -Dsonar.projectKey=dollar-funding-infrastructure
+            -Dsonar.sources=infrastructure
+            -Dsonar.terraform.provider=aws
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  plan:
+    name: Plan Infrastructure Changes
+    runs-on: ubuntu-latest
+    needs: security-scan
+    strategy:
+      matrix:
+        environment: [development, staging, production]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          
+      - name: Initialize Terraform
+        run: |
+          cd infrastructure/terraform/environments/${{ matrix.environment }}
+          terraform init
+          
+      - name: Plan Terraform changes
+        run: |
+          cd infrastructure/terraform/environments/${{ matrix.environment }}
+          terraform plan -out=tfplan
+          
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: infrastructure/terraform/environments/${{ matrix.environment }}/tfplan
+          retention-days: 1
+
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: plan
+    environment:
+      name: ${{ github.event.inputs.environment || 'development' }}
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          
+      - name: Download Terraform plan
+        uses: actions/download-artifact@v3
+        with:
+          name: tfplan-${{ github.event.inputs.environment || 'development' }}
+          path: infrastructure/terraform/environments/${{ github.event.inputs.environment || 'development' }}
+          
+      - name: Create infrastructure backup
+        run: |
+          chmod +x infrastructure/scripts/backup.sh
+          ./infrastructure/scripts/backup.sh
+        
+      - name: Apply Terraform changes
+        run: |
+          cd infrastructure/terraform/environments/${{ github.event.inputs.environment || 'development' }}
+          terraform apply -auto-approve tfplan
+          
+      - name: Execute blue-green deployment
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh \
+            --environment ${{ github.event.inputs.environment || 'development' }} \
+            --timeout ${{ env.DEPLOY_TIMEOUT }}
+            
+      - name: Perform health checks
+        id: health_check
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh \
+            --retries ${{ env.HEALTH_CHECK_RETRIES }} \
+            --interval ${{ env.HEALTH_CHECK_INTERVAL }}
+            
+      - name: Rollback on failure
+        if: failure() && steps.health_check.outcome == 'failure'
+        run: |
+          chmod +x infrastructure/scripts/rollback.sh
+          ./infrastructure/scripts/rollback.sh
+          
+      - name: Update deployment status
+        if: always()
+        run: |
+          if [[ "${{ steps.health_check.outcome }}" == "success" ]]; then
+            echo "Deployment completed successfully"
+            exit 0
+          else
+            echo "Deployment failed, rollback executed"
+            exit 1
+          fi
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+    
+    steps:
+      - name: Notify Slack on success
+        if: needs.deploy.result == 'success'
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          channel-id: ${{ secrets.SLACK_CHANNEL_ID }}
+          slack-message: "✅ Infrastructure deployment to ${{ github.event.inputs.environment || 'development' }} completed successfully"
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          
+      - name: Notify Slack on failure
+        if: needs.deploy.result == 'failure'
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          channel-id: ${{ secrets.SLACK_CHANNEL_ID }}
+          slack-message: "❌ Infrastructure deployment to ${{ github.event.inputs.environment || 'development' }} failed. Please check the logs."
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
