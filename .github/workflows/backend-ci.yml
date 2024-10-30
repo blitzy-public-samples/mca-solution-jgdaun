@@ -1,0 +1,163 @@
+# Backend Continuous Integration Workflow
+# Implements automated testing, security scanning, and build processes for the backend application
+# Version: 1.0.0
+
+name: Backend CI
+
+# Trigger workflow on push to main/develop branches and pull requests
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+env:
+  # Global environment variables from specification
+  PYTHON_VERSION: '3.8'
+  POETRY_VERSION: '1.1.11'
+  PYTEST_COVERAGE_THRESHOLD: '85'
+  # Docker configuration
+  DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+  IMAGE_NAME: backend-api
+  # SonarQube configuration
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+jobs:
+  # Job: Run tests and code quality checks
+  test:
+    name: Test and Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Implements requirement: Code checkout for CI pipeline
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  # Required for SonarQube analysis
+      
+      # Implements requirement: Python environment setup
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      # Implements requirement: Poetry dependency management
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 - --version ${{ env.POETRY_VERSION }}
+          poetry config virtualenvs.create false
+      
+      # Implements requirement: Dependency caching
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+      
+      # Implements requirement: Install project dependencies
+      - name: Install dependencies
+        working-directory: src/backend
+        run: poetry install
+      
+      # Implements requirement: Code formatting check
+      - name: Check code formatting
+        working-directory: src/backend
+        run: |
+          poetry run black --check .
+          
+      # Implements requirement: Code linting
+      - name: Run linting
+        working-directory: src/backend
+        run: poetry run flake8 .
+      
+      # Implements requirement: Type checking
+      - name: Run type checking
+        working-directory: src/backend
+        run: poetry run mypy .
+      
+      # Implements requirement: Run test suite with coverage
+      - name: Run tests with coverage
+        working-directory: src/backend
+        run: |
+          poetry run pytest --cov=app --cov-report=xml --cov-report=term-missing
+          coverage_percentage=$(poetry run coverage report | grep TOTAL | awk '{print $4}' | sed 's/%//')
+          if (( $(echo "$coverage_percentage < ${{ env.PYTEST_COVERAGE_THRESHOLD }}" | bc -l) )); then
+            echo "Test coverage ($coverage_percentage%) is below threshold (${{ env.PYTEST_COVERAGE_THRESHOLD }}%)"
+            exit 1
+          fi
+
+  # Job: Security scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      # Implements requirement: Dependency security scanning
+      - name: Run Snyk security scan
+        uses: snyk/actions/python@v1
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: monitor
+          args: --file=src/backend/poetry.lock
+      
+      # Implements requirement: Static code analysis
+      - name: SonarQube Scan
+        uses: sonarqube/sonarqube-scan-action@v1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=backend-api
+            -Dsonar.sources=src/backend/app
+            -Dsonar.python.coverage.reportPaths=src/backend/coverage.xml
+            -Dsonar.python.version=${{ env.PYTHON_VERSION }}
+
+  # Job: Build Docker image
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      # Implements requirement: Docker build setup
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      
+      # Implements requirement: Registry authentication
+      - name: Login to Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      
+      # Implements requirement: Build and push Docker image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: src/backend
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
