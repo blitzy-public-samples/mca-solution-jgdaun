@@ -1,0 +1,47 @@
+# Dollar Funding MCA Application Processing System - Robots.txt
+# Version: 1.0
+# Last Updated: 2024
+
+# Default rules for all web crawlers
+User-agent: *
+# Implements security by preventing access to sensitive application areas
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /documents/
+Disallow: /webhooks/
+Disallow: /settings/
+Disallow: /reports/
+
+# Allow access to public areas
+Allow: /
+Allow: /public/
+Allow: /static/
+Allow: /login
+Allow: /register
+Allow: /forgot-password
+
+# Implement rate limiting for crawlers to prevent server overload
+Crawl-delay: 10
+
+# XML Sitemap location for search engines
+Sitemap: https://domain.com/sitemap.xml
+
+# Specific rules for Google's crawler
+User-agent: Googlebot
+# Maintain same security restrictions as default
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /documents/
+Disallow: /webhooks/
+Disallow: /settings/
+Disallow: /reports/
+
+# Allow access to public areas for Googlebot
+Allow: /
+Allow: /public/
+Allow: /static/
+Allow: /login
+Allow: /register
+Allow: /forgot-password
