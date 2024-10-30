@@ -1,0 +1,174 @@
+# GitHub Actions workflow for deploying the Dollar Funding MCA Application Processing System to staging
+# Version: 1.0
+name: Deploy to Staging Environment
+
+on:
+  workflow_dispatch:  # Manual trigger as per staging deployment requirements
+  push:
+    branches:
+      - staging  # Deploy when changes are merged to staging branch
+
+env:
+  # Environment variables from specification
+  STAGING_ENV: staging
+  AWS_REGION: us-west-2
+  HEALTH_CHECK_RETRIES: 5
+  HEALTH_CHECK_INTERVAL: 30
+  ROLLBACK_TIMEOUT: 900
+  
+  # Container registry and image tags
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  BACKEND_IMAGE: backend-service
+  FRONTEND_IMAGE: frontend-service
+  OCR_IMAGE: ocr-service
+  
+  # Infrastructure configuration
+  TERRAFORM_VERSION: 1.0.0
+  TF_WORKSPACE: staging
+  
+  # Deployment configuration
+  REPLICAS: 3  # High availability requirement of minimum 3 replicas
+  DEPLOY_TIMEOUT: 600
+
+permissions:
+  id-token: write  # Required for AWS credential provider
+  contents: read   # Required for checking out code
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging  # Environment protection for staging
+    
+    steps:
+      # Step 1: Code checkout
+      - name: Checkout repository
+        uses: actions/checkout@v2  # Version from external dependencies
+        with:
+          fetch-depth: 0  # Full history for proper versioning
+      
+      # Step 2: Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1  # Version from external dependencies
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      # Step 3: Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2  # Version from external dependencies
+      
+      # Step 4: Login to Amazon ECR
+      - name: Login to Amazon ECR
+        uses: docker/login-action@v2  # Version from external dependencies
+        with:
+          registry: ${{ env.ECR_REGISTRY }}
+      
+      # Step 5: Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1  # Version from external dependencies
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      # Step 6: Initialize and apply Terraform
+      - name: Initialize Terraform
+        run: |
+          cd infrastructure/terraform/environments/staging
+          terraform init
+          terraform workspace select $TF_WORKSPACE || terraform workspace new $TF_WORKSPACE
+      
+      - name: Apply Terraform
+        run: |
+          cd infrastructure/terraform/environments/staging
+          terraform apply -auto-approve
+      
+      # Step 7: Create deployment backup
+      - name: Backup current deployment
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh backup_deployment staging
+      
+      # Step 8: Build and deploy backend service
+      - name: Deploy backend service
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_backend staging $REPLICAS
+        env:
+          DEPLOY_ENV: ${{ env.STAGING_ENV }}
+      
+      # Step 9: Build and deploy frontend service
+      - name: Deploy frontend service
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_frontend staging $REPLICAS
+        env:
+          DEPLOY_ENV: ${{ env.STAGING_ENV }}
+      
+      # Step 10: Build and deploy OCR service
+      - name: Deploy OCR service
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_ocr staging $REPLICAS
+        env:
+          DEPLOY_ENV: ${{ env.STAGING_ENV }}
+      
+      # Step 11: Perform health checks
+      - name: Perform health checks
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check staging
+        env:
+          HEALTH_CHECK_RETRIES: ${{ env.HEALTH_CHECK_RETRIES }}
+          HEALTH_CHECK_INTERVAL: ${{ env.HEALTH_CHECK_INTERVAL }}
+      
+      # Step 12: Log deployment metrics
+      - name: Log deployment metrics
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh log_health_metrics staging
+      
+      # Step 13: Execute rollback on failure
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          chmod +x infrastructure/scripts/rollback.sh
+          ./infrastructure/scripts/rollback.sh rollback_backend staging
+          ./infrastructure/scripts/rollback.sh rollback_frontend staging
+          ./infrastructure/scripts/rollback.sh rollback_ocr staging
+        env:
+          ROLLBACK_TIMEOUT: ${{ env.ROLLBACK_TIMEOUT }}
+      
+      # Step 14: Run integration tests
+      - name: Run integration tests
+        run: |
+          # Execute integration test suite
+          npm run test:integration
+      
+      # Step 15: Run performance tests
+      - name: Run performance tests
+        run: |
+          # Execute performance test suite
+          npm run test:performance
+      
+      # Step 16: Execute security scans
+      - name: Run security scans
+        run: |
+          # Execute security scanning
+          npm run security:scan
+      
+      # Step 17: Notify deployment status
+      - name: Notify deployment status
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { status } = context;
+            const state = status === 'success' ? '✅ Success' : '❌ Failure';
+            const message = `Staging Deployment ${state}\nEnvironment: ${process.env.STAGING_ENV}\nRegion: ${process.env.AWS_REGION}`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
