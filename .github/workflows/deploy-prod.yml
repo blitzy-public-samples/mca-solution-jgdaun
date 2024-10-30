@@ -1,0 +1,315 @@
+# Dollar Funding MCA Application Processing System Production Deployment Workflow
+# Version: 1.0
+name: Production Deployment
+
+on:
+  # Manual trigger with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+      approval_ticket:
+        description: 'Change Management Ticket ID'
+        required: true
+
+# Environment variables from specification
+env:
+  AWS_REGION: us-east-1
+  DEPLOY_ENV: production
+  HEALTH_CHECK_RETRIES: 5
+  HEALTH_CHECK_INTERVAL: 30
+  ROLLBACK_TIMEOUT: 900
+
+# Permissions required for deployment
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Pre-deployment validation and approval
+  validate:
+    name: Validate Deployment Requirements
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2 # v2 specified in external dependencies
+      
+      - name: Verify Change Management Ticket
+        run: |
+          if [[ ! "${{ github.event.inputs.approval_ticket }}" =~ ^CHANGE-[0-9]{6}$ ]]; then
+            echo "Error: Invalid change management ticket format. Must match CHANGE-XXXXXX"
+            exit 1
+          fi
+
+  # Infrastructure preparation and validation
+  prepare-infrastructure:
+    needs: validate
+    name: Prepare Infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1 # v1 specified in external dependencies
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1 # v1 specified in external dependencies
+        with:
+          terraform_version: 1.0.0
+      
+      - name: Initialize Terraform
+        working-directory: infrastructure/terraform/environments/prod
+        run: terraform init
+      
+      - name: Validate Terraform Configuration
+        working-directory: infrastructure/terraform/environments/prod
+        run: terraform validate
+
+  # Build and push Docker images
+  build:
+    needs: prepare-infrastructure
+    name: Build Services
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2 # v2 specified in external dependencies
+      
+      - name: Login to Amazon ECR
+        uses: docker/login-action@v2 # v2 specified in external dependencies
+        with:
+          registry: ${{ secrets.AWS_ECR_REGISTRY }}
+          username: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          password: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      
+      - name: Build and Push Backend Image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file infrastructure/docker/backend.dockerfile \
+            --tag ${{ secrets.AWS_ECR_REGISTRY }}/backend:${{ github.sha }} \
+            --push .
+      
+      - name: Build and Push Frontend Image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file infrastructure/docker/frontend.dockerfile \
+            --tag ${{ secrets.AWS_ECR_REGISTRY }}/frontend:${{ github.sha }} \
+            --push .
+      
+      - name: Build and Push OCR Service Image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file infrastructure/docker/ocr.dockerfile \
+            --tag ${{ secrets.AWS_ECR_REGISTRY }}/ocr:${{ github.sha }} \
+            --push .
+
+  # Deploy backend service
+  deploy-backend:
+    needs: build
+    name: Deploy Backend Service
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Create Backup
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh backup_deployment production backend
+      
+      - name: Deploy Backend
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_backend production
+      
+      - name: Verify Backend Health
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check production backend-service
+      
+      - name: Log Deployment Metrics
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh log_health_metrics backend-service 1
+
+  # Deploy frontend service
+  deploy-frontend:
+    needs: deploy-backend
+    name: Deploy Frontend Service
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Create Backup
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh backup_deployment production frontend
+      
+      - name: Deploy Frontend
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_frontend production
+      
+      - name: Verify Frontend Health
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check production frontend-service
+      
+      - name: Log Deployment Metrics
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh log_health_metrics frontend-service 1
+
+  # Deploy OCR service
+  deploy-ocr:
+    needs: deploy-backend
+    name: Deploy OCR Service
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Create Backup
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh backup_deployment production ocr
+      
+      - name: Deploy OCR Service
+        run: |
+          chmod +x infrastructure/scripts/deploy.sh
+          ./infrastructure/scripts/deploy.sh deploy_ocr production
+      
+      - name: Verify OCR Service Health
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check production ocr-service
+      
+      - name: Log Deployment Metrics
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh log_health_metrics ocr-service 1
+
+  # Post-deployment verification
+  verify-deployment:
+    needs: [deploy-frontend, deploy-ocr]
+    name: Verify Full Deployment
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Comprehensive Health Check
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check production
+      
+      - name: Update DNS and CDN
+        if: success()
+        run: |
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id ${{ secrets.ROUTE53_ZONE_ID }} \
+            --change-batch file://infrastructure/terraform/environments/prod/dns-update.json
+          
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+      
+      - name: Notify Deployment Status
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          TICKET="${{ github.event.inputs.approval_ticket }}"
+          
+          if [[ "$STATUS" == "success" ]]; then
+            echo "Deployment completed successfully. Change ticket: $TICKET"
+            # Add notification logic (e.g., SNS, Slack, etc.)
+          else
+            echo "Deployment failed. Change ticket: $TICKET"
+            # Add failure notification logic
+          fi
+
+  # Rollback on failure
+  rollback:
+    needs: [deploy-frontend, deploy-ocr]
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    environment: production
+    if: failure()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GithubActionsDeployment
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Execute Rollback
+        run: |
+          chmod +x infrastructure/scripts/rollback.sh
+          ./infrastructure/scripts/rollback.sh backend production
+          ./infrastructure/scripts/rollback.sh frontend production
+          ./infrastructure/scripts/rollback.sh ocr production
+      
+      - name: Verify Rollback Health
+        run: |
+          chmod +x infrastructure/scripts/health-check.sh
+          ./infrastructure/scripts/health-check.sh perform_health_check production
+      
+      - name: Notify Rollback Status
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          TICKET="${{ github.event.inputs.approval_ticket }}"
+          
+          if [[ "$STATUS" == "success" ]]; then
+            echo "Rollback completed successfully. Change ticket: $TICKET"
+            # Add notification logic
+          else
+            echo "Rollback failed. Change ticket: $TICKET"
+            # Add failure notification logic
+          fi
