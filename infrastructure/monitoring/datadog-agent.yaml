@@ -1,0 +1,236 @@
+# Datadog Agent version: 7.32.0
+# Datadog Cluster Agent version: 1.20.0
+
+# This configuration implements:
+# 1. Comprehensive monitoring and logging using Datadog integrated with Prometheus
+# 2. Service monitoring for Email, Document, OCR, Webhook, and UI services
+# 3. Infrastructure and application performance monitoring
+# 4. Custom dashboards and alerts configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datadog-agent-config
+  namespace: default
+  labels:
+    app: datadog-agent
+    environment: production
+data:
+  datadog.yaml: |
+    # Global Datadog configuration
+    api_key: ${DATADOG_API_KEY}
+    site: datadoghq.com
+    env: production
+    tags:
+      - env:production
+      - service:backend
+      - region:us-east-1
+
+    # Enable logs collection
+    logs_enabled: true
+    logs_config:
+      container_collect_all: true
+      processing_rules:
+        - type: multi_line
+          name: stack_traces
+          pattern: '^[\s\t]+'
+
+    # APM and tracing configuration
+    apm_config:
+      enabled: true
+      analyzed_spans:
+        backend|http.request: 1.0
+        ocr-service|process.document: 1.0
+
+    # Process monitoring configuration
+    process_config:
+      enabled: true
+      process_collection_enabled: true
+      container_collection_enabled: true
+
+    # Prometheus integration configuration
+    prometheus:
+      enabled: true
+      scrape_configs:
+        - job_name: kubernetes-services
+          kubernetes_sd_configs:
+            - role: service
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+              action: keep
+              regex: true
+
+    # Kubernetes integration configuration
+    kubernetes:
+      enabled: true
+      collect_events: true
+      collect_service_checks: true
+
+    # Custom metrics configuration
+    dogstatsd:
+      port: 8125
+      non_local_traffic: true
+      tags_as_cardinality: high
+
+    # Dashboard configuration
+    dashboard_config:
+      enabled: true
+      default_dashboards: true
+      custom_dashboards:
+        infrastructure:
+          title: Infrastructure Overview
+          widgets:
+            - system.cpu.user
+            - system.mem.used
+            - system.disk.used
+            - kubernetes.pods.running
+        application:
+          title: Application Performance
+          widgets:
+            - http.requests
+            - http.errors
+            - apm.service.latency
+            - trace.http.request.duration
+        business:
+          title: Business Metrics
+          widgets:
+            - document.processing.rate
+            - ocr.accuracy
+            - email.processing.time
+            - webhook.delivery.success_rate
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: datadog-agent
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: datadog-agent
+  template:
+    metadata:
+      labels:
+        app: datadog-agent
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8125"
+    spec:
+      serviceAccountName: datadog-agent
+      containers:
+        - name: datadog-agent
+          image: datadog/agent:7.32.0
+          imagePullPolicy: Always
+          env:
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: secrets
+                  key: DATADOG_API_KEY
+            - name: DD_SITE
+              value: "datadoghq.com"
+            - name: DD_ENV
+              value: "production"
+            - name: DD_LOGS_ENABLED
+              value: "true"
+            - name: DD_APM_ENABLED
+              value: "true"
+            - name: DD_PROCESS_AGENT_ENABLED
+              value: "true"
+            - name: DD_KUBERNETES_KUBELET_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          ports:
+            - containerPort: 8125
+              name: dogstatsdport
+              protocol: UDP
+            - containerPort: 8126
+              name: traceport
+              protocol: TCP
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: dockersocket
+              mountPath: /var/run/docker.sock
+            - name: procdir
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroups
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            - name: config-volume
+              mountPath: /etc/datadog-agent
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5555
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5555
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+      volumes:
+        - name: dockersocket
+          hostPath:
+            path: /var/run/docker.sock
+        - name: procdir
+          hostPath:
+            path: /proc
+        - name: cgroups
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: config-volume
+          configMap:
+            name: datadog-agent-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datadog-agent
+  namespace: default
+spec:
+  selector:
+    app: datadog-agent
+  ports:
+    - port: 8125
+      name: dogstatsdport
+      protocol: UDP
+    - port: 8126
+      name: traceport
+      protocol: TCP
+
+---
+# Alerts configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datadog-alerts
+  namespace: default
+data:
+  alerts.yaml: |
+    alerts:
+      cpu_usage:
+        type: metric alert
+        query: avg(last_5m):avg:system.cpu.user{*} by {host} > 80
+        message: CPU usage is above 80% on {{host}}
+      memory_usage:
+        type: metric alert
+        query: avg(last_5m):avg:system.mem.used{*} by {host} > 90
+        message: Memory usage is above 90% on {{host}}
+      api_latency:
+        type: metric alert
+        query: avg(last_5m):avg:trace.http.request.duration{*} > 2
+        message: API latency is above 2 seconds
